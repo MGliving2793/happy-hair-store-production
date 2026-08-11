@@ -274,7 +274,7 @@
       }
 
       grid.innerHTML = products.map(p => {
-        const img = p.image_url ? (p.image_url.startsWith('http') || p.image_url.startsWith('/') ? p.image_url : '/' + p.image_url) : '///images/w0ut7ai7_WhatsApp%20Image%202026-06-23%20at%2010.55.35%20AM.jpeg';
+        const img = p.image_url ? (p.image_url.startsWith('http') || p.image_url.startsWith('/') ? p.image_url : '/' + p.image_url) : '/images/w0ut7ai7_WhatsApp%20Image%202026-06-23%20at%2010.55.35%20AM.jpeg';
         return `
           <div class="dynamic-prod-card" data-product-id="${p.id}">
             <img src="${img}" class="dynamic-prod-img" onerror="this.src='https://via.placeholder.com/300x220?text=Happy+Hair'">
