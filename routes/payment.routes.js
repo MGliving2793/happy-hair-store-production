@@ -1,100 +1,378 @@
 const express = require('express');
-const crypto = require('crypto');
 const router = express.Router();
 const prisma = require('../db');
 const authMiddleware = require('../middlewares/auth.middleware');
-const { finalizePaidOrder } = require('../controllers/order.controller');
+const { dispatchToShipCorrect } = require('../controllers/order.controller');
 
-const MERCHANT_UPI_ID = process.env.MERCHANT_UPI_ID || '';
+// Change these to your actual details
+const MERCHANT_UPI_ID = process.env.MERCHANT_UPI_ID || 'murthyjio7@ibl';
 const MERCHANT_NAME = process.env.MERCHANT_NAME || 'Happy Hair';
 
-function paymentData(order) {
-  try { return JSON.parse(order.payment_receipt || '{}'); } catch { return {}; }
+// Simple HTML sanitizer
+function sanitize(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[<>"'&]/g, (char) => {
+    const map = { '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '&': '&amp;' };
+    return map[char] || char;
+  });
 }
-function savePaymentData(data) { return JSON.stringify(data); }
 
+/**
+ * 0. UPI Config - Returns the merchant UPI configuration
+ * GET /api/payment/upi-config
+ */
 router.get('/upi-config', (req, res) => {
-  res.json({ active: Boolean(MERCHANT_UPI_ID), upi_id: MERCHANT_UPI_ID, merchant_name: MERCHANT_NAME });
+  res.json({
+    active: true,
+    upi_id: MERCHANT_UPI_ID,
+    merchant_name: MERCHANT_NAME,
+    message: "UPI is currently available"
+  });
 });
 
+/**
+ * 1. Checkout Page - Renders the payment gateway UI
+ * GET /api/payment/checkout/:orderId
+ */
 router.get('/checkout/:orderId', async (req, res) => {
   try {
-    const order = await prisma.order.findUnique({ where: { id: Number(req.params.orderId) } });
-    if (!order) return res.status(404).send('Order not found');
-    if (['PAID','PROCESSING','SHIPPED','DELIVERED'].includes(order.status)) return res.redirect(`/api/orders/status/${order.id}`);
+    const { orderId } = req.params;
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(orderId) }
+    });
 
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const data = paymentData(order);
-    const manual = !keyId || !data.gatewayOrderId;
-    const safeTotal = Number(order.total).toFixed(2);
-    const safeName = String(order.customer_name).replace(/[<>]/g, '');
-
-    if (manual) {
-      return res.type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment | ${MERCHANT_NAME}</title><style>body{font-family:Arial;background:#f7f3ea;padding:24px}.card{max-width:430px;margin:auto;background:#fff;padding:28px;border-radius:18px;box-shadow:0 8px 30px #0001}img{width:220px;height:220px;object-fit:contain;display:block;margin:20px auto}.btn{width:100%;padding:14px;border:0;border-radius:10px;background:#173b20;color:#fff;font-weight:700}.input{width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;margin:8px 0 14px}</style></head><body><div class="card"><h2>${MERCHANT_NAME}</h2><p>Order #${order.id}</p><h1>₹${safeTotal}</h1><p>Pay using the UPI ID below, then submit your UTR.</p><p><strong>${MERCHANT_UPI_ID || 'UPI is not configured yet'}</strong></p>${MERCHANT_UPI_ID ? '<img src="/images/qr_scanner.jpg" alt="UPI QR">' : ''}<form method="post" action="/api/payment/claim/${order.id}"><input class="input" name="utr" minlength="6" placeholder="Enter UTR after payment" required><button class="btn">Submit Payment Reference</button></form></div></body></html>`);
+    if (!order) {
+      return res.status(404).send('Order not found');
     }
 
-    return res.type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Secure Payment | ${MERCHANT_NAME}</title><script src="https://checkout.razorpay.com/v1/checkout.js"></script><style>body{font-family:Arial;background:#f7f3ea;display:grid;place-items:center;min-height:100vh}.card{background:#fff;padding:30px;border-radius:18px;text-align:center;max-width:420px;width:calc(100% - 40px)}button{padding:14px 22px;border:0;border-radius:10px;background:#173b20;color:#fff;font-weight:700}</style></head><body><div class="card"><h2>${MERCHANT_NAME}</h2><p>Order #${order.id}</p><h1>₹${safeTotal}</h1><p>Customer: ${safeName}</p><button id="pay">Pay securely</button><p id="msg"></p></div><script>document.getElementById('pay').onclick=function(){const rzp=new Razorpay({key:${JSON.stringify(keyId)},amount:${Math.round(order.total*100)},currency:'INR',name:${JSON.stringify(MERCHANT_NAME)},description:'Happy Hair Order #${order.id}',order_id:${JSON.stringify(data.gatewayOrderId)},prefill:{name:${JSON.stringify(order.customer_name)},email:${JSON.stringify(order.email)},contact:${JSON.stringify(order.phone)}},handler:async function(resp){document.getElementById('msg').textContent='Verifying payment...';const r=await fetch('/api/payment/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:${order.id},razorpay_order_id:resp.razorpay_order_id,razorpay_payment_id:resp.razorpay_payment_id,razorpay_signature:resp.razorpay_signature})});const d=await r.json();if(r.ok){location.href='/api/orders/status/'+${order.id}}else{document.getElementById('msg').textContent=d.error||'Payment verification failed';}},modal:{ondismiss:function(){document.getElementById('msg').textContent='Payment window closed.'}}});rzp.open()};</script></body></html>`);
+    // Auto-update to Pending Verification if not already
+    if (order.status === 'PENDING') {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'Pending Verification' }
+      });
+    }
+
+    const safeCustomerName = sanitize(order.customer_name);
+    const safeAddress = sanitize(order.address);
+    const safeCity = sanitize(order.city);
+    const safePincode = sanitize(order.pincode);
+    const safeOrderNo = sanitize(order.order_no);
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Secure Checkout | ${MERCHANT_NAME}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+        <style>
+          :root {
+            --primary: #c99339;
+            --primary-glow: rgba(201, 147, 57, 0.3);
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --text: #f5f5f5;
+            --text-light: #a3a3a3;
+            --border: #333333;
+            --success: #10b981;
+          }
+          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+          body { background-color: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+          
+          .gateway {
+            background: rgba(17, 17, 17, 0.8);
+            backdrop-filter: blur(20px);
+            width: 100%;
+            max-width: 440px;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            overflow: hidden;
+            position: relative;
+          }
+          
+          .gateway::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+          }
+          
+          .gw-header {
+            padding: 32px 24px 24px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+          }
+          .gw-brand { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--primary); margin-bottom: 16px; letter-spacing: 1px; }
+          .gw-amount-row { display: flex; justify-content: center; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+          .gw-amount { font-size: 42px; font-weight: 300; font-family: 'Playfair Display', serif; }
+          .gw-order-id { font-size: 14px; color: var(--text-light); text-transform: uppercase; letter-spacing: 1px; }
+          .gw-lock { font-size: 12px; color: var(--success); display: flex; align-items: center; justify-content: center; gap: 6px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 16px; }
+          
+          .gw-body { padding: 32px 24px; text-align: center; }
+          
+          .step { display: none; }
+          .step.active { display: block; animation: fadeIn 0.5s ease; }
+          
+          .step-label { font-size: 14px; font-weight: 500; color: var(--text-light); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 24px; }
+          
+          /* QR Code Scanner */
+          .qr-box {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 32px 24px;
+            margin-bottom: 24px;
+            position: relative;
+            box-shadow: 0 0 30px rgba(255,255,255,0.05);
+          }
+          .qr-box img {
+            width: 220px;
+            height: 220px;
+            object-fit: cover;
+            border-radius: 12px;
+            margin-bottom: 24px;
+          }
+          .qr-upi { font-size: 18px; font-weight: 600; color: #111; margin-bottom: 8px; letter-spacing: 0.5px; }
+          .qr-hint { font-size: 14px; color: #666; font-weight: 500; }
+          
+          /* Scanning Animation */
+          .scanning-status {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(201, 147, 57, 0.05);
+            border: 1px solid rgba(201, 147, 57, 0.2);
+            border-radius: 16px;
+            margin-top: 24px;
+          }
+          .radar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--primary);
+            position: relative;
+            margin-bottom: 16px;
+          }
+          .radar::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px; height: 12px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite ease-out;
+            box-shadow: 0 0 10px var(--primary);
+          }
+          .scan-text { font-size: 14px; font-weight: 500; color: var(--primary); letter-spacing: 0.5px; }
+          
+          /* Success Box */
+          .success-box { text-align: center; padding: 20px 0; }
+          .success-icon { font-size: 72px; margin-bottom: 24px; animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+          .success-title { font-size: 28px; font-family: 'Playfair Display', serif; color: var(--success); margin-bottom: 16px; }
+          .success-sub { font-size: 16px; color: var(--text-light); margin-bottom: 40px; line-height: 1.6; }
+          
+          .track-btn {
+            display: block; width: 100%; padding: 18px; 
+            background: linear-gradient(135deg, #c99339 0%, #a67323 100%); 
+            color: #fff; border: none; border-radius: 12px; 
+            font-size: 16px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+            text-decoration: none; transition: all 0.3s ease;
+            box-shadow: 0 10px 20px var(--primary-glow);
+          }
+          .track-btn:hover { transform: translateY(-2px); box-shadow: 0 15px 25px var(--primary-glow); }
+          
+          .gw-footer { padding: 24px; text-align: center; font-size: 12px; color: var(--border); border-top: 1px solid rgba(255,255,255,0.05); }
+          
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes pulse { 0% { width: 12px; height: 12px; opacity: 1; } 100% { width: 50px; height: 50px; opacity: 0; } }
+          @keyframes popIn { 0% { opacity: 0; transform: scale(0.5); } 100% { opacity: 1; transform: scale(1); } }
+        </style>
+      </head>
+      <body>
+        <div class="gateway">
+          <!-- HEADER -->
+          <div class="gw-header">
+            <div class="gw-brand">Happy Hair — Couture Checkout</div>
+            <div class="gw-amount-row">
+              <span class="gw-amount">₹${order.total}</span>
+              <span class="gw-order-id">Order #${order.id}</span>
+            </div>
+            <div class="gw-lock">🔒 Bank-Grade Encryption</div>
+          </div>
+
+          <div class="gw-body">
+            <!-- ===== STEP 1: Scanner ===== -->
+            <div class="step active" id="step-qr">
+              <div class="step-label">Complete Payment</div>
+              
+              <div class="qr-box">
+                <!-- IMPORTANT: Add a leading slash so it loads from domain root -->
+                <img src="/qr_scanner.jpg" alt="UPI QR Code" onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/d/d0/QR_code_for_mobile_English_Wikipedia.svg'" />
+                <div class="qr-upi">${MERCHANT_UPI_ID}</div>
+                <div class="qr-hint">Scan with PhonePe, GPay, or Paytm</div>
+              </div>
+              
+              <div class="scanning-status">
+                <div class="radar"></div>
+                <div class="scan-text">Awaiting transfer confirmation...</div>
+              </div>
+            </div>
+
+            <!-- ===== STEP 2: Success ===== -->
+            <div class="step" id="step-success">
+              <div class="success-box">
+                <div class="success-icon">🎉</div>
+                <div class="success-title" style="color: var(--primary);">Payment Approved!</div>
+                <div class="success-sub">Your payment has been received and approved by management. Your order has been dispatched to Shiprocket / ShipCorrect for delivery.</div>
+                
+                <div id="order-details-card" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 16px; padding: 20px; text-align: left; margin-bottom: 24px;">
+                  <p style="margin-bottom: 8px;"><strong>Order ID:</strong> <span id="detail-order-id">#${order.id}</span></p>
+                  <p style="margin-bottom: 8px;"><strong>Shiprocket / Shipping Order #:</strong> <span id="detail-shipno" style="color: var(--primary); font-weight: 700;">${safeOrderNo || 'Generating...'}</span></p>
+                  <p style="margin-bottom: 8px;"><strong>Customer:</strong> <span id="detail-customer">${safeCustomerName}</span></p>
+                  <p style="margin-bottom: 8px;"><strong>Delivery Address:</strong> <span id="detail-address">${safeAddress} ${safeCity ? ', ' + safeCity : ''} ${safePincode ? ' - ' + safePincode : ''}</span></p>
+                  <p style="margin-bottom: 0;"><strong>Total Paid:</strong> <span id="detail-total" style="color: var(--success); font-weight: 700;">₹${order.total}</span></p>
+                </div>
+
+                <a href="/api/orders/status/${order.id}" class="track-btn">Track Order Progress</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="gw-footer">
+            <p>100% SECURE TRANSACTIONS • ${MERCHANT_NAME}</p>
+          </div>
+        </div>
+
+        <script>
+          const ORDER_ID = ${order.id};
+          let pollTimer = null;
+
+          function goToStep(stepId) {
+            document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+            document.getElementById(stepId).classList.add('active');
+          }
+
+          // Start polling backend immediately
+          function startPolling() {
+            pollTimer = setInterval(async () => {
+              try {
+                const res = await fetch('/api/payment/status/' + ORDER_ID);
+                const data = await res.json();
+                
+                // If status is "Processing", "PAID", or anything other than Pending
+                if (data.status && data.status !== 'Pending Verification' && data.status !== 'PENDING') {
+                  clearInterval(pollTimer);
+                  
+                  // Helper function to escape HTML before setting textContent (or rely on textContent which handles it naturally)
+                  if (data.order_no) document.getElementById('detail-shipno').textContent = data.order_no;
+                  if (data.customer_name) document.getElementById('detail-customer').textContent = data.customer_name;
+                  
+                  let fullAddress = data.address || '';
+                  if (data.city) fullAddress += ', ' + data.city;
+                  if (data.pincode) fullAddress += ' - ' + data.pincode;
+                  if (fullAddress) document.getElementById('detail-address').textContent = fullAddress;
+                  
+                  if (data.total) document.getElementById('detail-total').textContent = '₹' + data.total;
+                  goToStep('step-success');
+                }
+              } catch (e) {
+                // silently retry
+              }
+            }, 3000);
+          }
+
+          // Start checking on load
+          window.onload = startPolling;
+        </script>
+      </body>
+      </html>
+    `;
+
+    res.send(html);
   } catch (error) {
-    console.error('[CHECKOUT]', error);
-    res.status(500).send('Unable to open checkout');
+    console.error('Checkout error:', error);
+    res.status(500).send('Error loading checkout page');
   }
 });
 
-router.post('/create/:orderId', async (req, res) => {
-  try {
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) return res.status(503).json({ error: 'Online payment gateway is not configured' });
-    const Razorpay = require('razorpay');
-    const order = await prisma.order.findUnique({ where: { id: Number(req.params.orderId) } });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const existing = paymentData(order);
-    if (existing.gatewayOrderId) return res.json({ key_id: process.env.RAZORPAY_KEY_ID, gateway_order_id: existing.gatewayOrderId, amount: Math.round(order.total * 100), currency: 'INR' });
-    const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-    const rp = await razorpay.orders.create({ amount: Math.round(order.total * 100), currency: 'INR', receipt: `HH-${order.id}`, notes: { internal_order_id: String(order.id) } });
-    const data = { gateway: 'razorpay', gatewayOrderId: rp.id };
-    await prisma.order.update({ where: { id: order.id }, data: { payment_receipt: savePaymentData(data) } });
-    res.json({ key_id: process.env.RAZORPAY_KEY_ID, gateway_order_id: rp.id, amount: rp.amount, currency: rp.currency });
-  } catch (error) { console.error('[RAZORPAY CREATE]', error); res.status(502).json({ error: 'Unable to create payment order' }); }
-});
-
-router.post('/verify', async (req, res) => {
-  try {
-    const { order_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    const order = await prisma.order.findUnique({ where: { id: Number(order_id) } });
-    if (!order) return res.status(404).json({ error: 'Order not found' });
-    const stored = paymentData(order);
-    if (!stored.gatewayOrderId || stored.gatewayOrderId !== razorpay_order_id) return res.status(400).json({ error: 'Payment order mismatch' });
-    if (!process.env.RAZORPAY_KEY_SECRET) return res.status(500).json({ error: 'Payment gateway is not configured' });
-    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
-    if (expected !== razorpay_signature) return res.status(400).json({ error: 'Payment signature verification failed' });
-    await prisma.order.update({ where: { id: order.id }, data: { payment_receipt: savePaymentData({ ...stored, paymentId: razorpay_payment_id, verified: true, verifiedAt: new Date().toISOString() }) } });
-    const updated = await finalizePaidOrder(order.id);
-    res.json({ message: 'Payment verified', order_id: updated.id, status: updated.status, shipping_order_no: updated.order_no || null });
-  } catch (error) { console.error('[RAZORPAY VERIFY]', error); res.status(500).json({ error: 'Payment verification failed' }); }
-});
-
-router.post('/claim/:orderId', express.urlencoded({ extended: false }), async (req, res) => {
-  try {
-    const id = Number(req.params.orderId);
-    const utr = String(req.body.utr || '').trim();
-    if (utr.length < 6) return res.status(400).send('Invalid UTR');
-    await prisma.order.update({ where: { id }, data: { utr, status: 'PENDING_PAYMENT' } });
-    res.redirect(`/api/orders/status/${id}`);
-  } catch { res.status(500).send('Unable to submit payment reference'); }
-});
-
+/**
+ * 2. Get Payment Status (Polled by frontend)
+ * GET /api/payment/status/:orderId
+ */
 router.get('/status/:orderId', async (req, res) => {
   try {
-    const order = await prisma.order.findUnique({ where: { id: Number(req.params.orderId) } });
+    const { orderId } = req.params;
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(orderId) }
+    });
+
     if (!order) return res.status(404).json({ error: 'Not found' });
-    res.json({ status: order.status, order_no: order.order_no, utr: order.utr, customer_name: order.customer_name, address: order.address, city: order.city, state: order.state, pincode: order.pincode, phone: order.phone, total: order.total, pay_mode: order.pay_mode, cart_details: order.cart_details });
-  } catch { res.status(500).json({ error: 'Server error' }); }
+    
+    res.json({ 
+      status: order.status, 
+      order_no: order.order_no, 
+      utr: order.utr,
+      customer_name: order.customer_name,
+      address: order.address,
+      city: order.city,
+      state: order.state,
+      pincode: order.pincode,
+      phone: order.phone,
+      total: order.total,
+      pay_mode: order.pay_mode,
+      cart_details: order.cart_details
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
+/**
+ * 3. Approve Payment (MERCHANT ENDPOINT)
+ * POST /api/payment/approve/:orderId
+ * Call this after you manually verify the payment in your bank.
+ */
 router.post('/approve/:orderId', authMiddleware, async (req, res) => {
   try {
-    const updated = await finalizePaidOrder(Number(req.params.orderId));
-    res.json({ message: 'Payment approved', order_id: updated.id, status: updated.status, shipCorrectOrderNo: updated.order_no || null });
-  } catch (error) { res.status(400).json({ error: error.message || 'Unable to approve payment' }); }
+    const { orderId } = req.params;
+    
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(orderId) }
+    });
+
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.status === 'Processing' || order.status === 'PAID' || order.status === 'Shipped') {
+      return res.status(400).json({ error: 'Order is already approved' });
+    }
+
+    // 1. Dispatch to ShipCorrect / Shiprocket
+    let cart = [];
+    try { cart = JSON.parse(order.cart_details); } catch(e) {}
+    
+    const shipCorrectOrderNo = await dispatchToShipCorrect(order, cart);
+
+    // 2. Update status to Processing
+    const updatedOrder = await prisma.order.update({
+      where: { id: order.id },
+      data: { 
+        status: 'Processing',
+        order_no: shipCorrectOrderNo ? shipCorrectOrderNo.toString() : order.order_no
+      }
+    });
+
+    res.json({ 
+      message: 'Payment verified! Order dispatched to ShipCorrect / Shiprocket.',
+      shipCorrectOrderNo,
+      order_id: order.id,
+      status: updatedOrder.status
+    });
+  } catch (error) {
+    console.error('Approve error:', error);
+    res.status(500).json({ error: 'Failed to approve payment' });
+  }
 });
 
 module.exports = router;
