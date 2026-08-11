@@ -36,7 +36,7 @@ const schemas = {
       product_id: z.union([z.number(), z.string()]).optional(),
       cart: z.array(z.object({
         title: z.string(),
-        price: z.union([z.number(), z.string()]).optional(),
+        price: z.union([z.number(), z.string()]),
         quantity: z.union([z.number(), z.string()]),
         SKU: z.string().optional(),
         product_id: z.union([z.number(), z.string()]).optional(),

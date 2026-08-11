@@ -1,3 +1,4 @@
-const authMiddleware = require('./auth.middleware');
-const { validate, schemas, xssClean } = require('./validate.middleware');
-module.exports = { authMiddleware, validate, schemas, xssClean };
+module.exports = {
+  authMiddleware: require('./auth.middleware'),
+  ...require('./validate.middleware')
+};
