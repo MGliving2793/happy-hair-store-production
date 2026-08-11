@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Happy Hair — Natural Hair Nutrition</title>
+<meta name="description" content="Happy Hair — natural nutrition for healthy-looking hair.">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+:root{--green:#0b170d;--green2:#152718;--gold:#c99339;--gold2:#e0ad55;--cream:#f7f2e8;--muted:#b8c0b7}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--green);color:#fff;font-family:Outfit,Arial,sans-serif}
+a{color:inherit;text-decoration:none}.nav{position:sticky;top:0;z-index:20;background:rgba(11,23,13,.92);backdrop-filter:blur(12px);border-bottom:1px solid rgba(201,147,57,.2)}
+.navin{max-width:1180px;margin:auto;height:70px;padding:0 20px;display:flex;align-items:center;justify-content:space-between}.brand{font-family:"Playfair Display",serif;font-size:25px;color:var(--gold2)}.navlinks{display:flex;gap:22px;color:#dce4dc;font-size:14px}.navlinks a:hover{color:var(--gold2)}
+.hero{min-height:540px;display:grid;place-items:center;position:relative;overflow:hidden;background:radial-gradient(circle at 70% 35%,rgba(201,147,57,.18),transparent 35%),linear-gradient(135deg,#0b170d,#142b18)}
+.hero:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,23,13,.96),rgba(11,23,13,.55),rgba(11,23,13,.25));pointer-events:none}
+.hero video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.32}
+.hero-content{position:relative;z-index:1;max-width:1180px;width:100%;padding:90px 20px}.eyebrow{text-transform:uppercase;letter-spacing:3px;color:var(--gold2);font-size:12px;font-weight:700}.hero h1{font-family:"Playfair Display",serif;font-size:clamp(44px,7vw,82px);line-height:1;margin:14px 0;max-width:720px}.hero p{max-width:590px;color:#d5ddd4;font-size:18px;line-height:1.6}.btn{display:inline-block;border:0;border-radius:28px;padding:13px 24px;background:linear-gradient(135deg,var(--gold2),#a67323);color:#fff;font-weight:700;cursor:pointer;margin-top:15px}
+.section{max-width:1180px;margin:auto;padding:70px 20px}.section h2{font-family:"Playfair Display",serif;font-size:38px;margin:0 0 10px}.section-sub{color:var(--muted);margin-bottom:30px}.dynamic-products-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px}.dynamic-prod-card{background:var(--green2)!important;border:1px solid rgba(201,147,57,.2)!important;border-radius:18px!important;padding:16px!important;box-shadow:0 8px 25px rgba(0,0,0,.2)}.dynamic-prod-img{height:250px!important;object-fit:cover;border-radius:14px}.dynamic-buy-btn{background:linear-gradient(135deg,var(--gold2),#a67323)!important;border-radius:25px!important}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.feature{padding:25px;border:1px solid rgba(201,147,57,.18);border-radius:16px;background:rgba(21,39,24,.55)}.feature b{display:block;color:var(--gold2);margin-bottom:7px}.feature p{color:var(--muted);line-height:1.5;margin:0}
+.footer{border-top:1px solid rgba(201,147,57,.15);padding:30px 20px;text-align:center;color:#879187;font-size:13px}
+@media(max-width:700px){.navlinks{display:none}.features{grid-template-columns:1fr}.hero{min-height:500px}}
+</style>
+</head>
+<body>
+<header class="nav"><div class="navin">
+<a class="brand" href="/">Happy Hair</a>
+<nav class="navlinks"><a href="#products">Products</a><a href="#why">Why Happy Hair</a><a href="#contact">Contact</a></nav>
+</div></header>
+<main>
+<section class="hero">
+<video autoplay muted loop playsinline preload="metadata"><source src="/promo_video.mp4" type="video/mp4"></video>
+<div class="hero-content">
+<div class="eyebrow">Natural hair nutrition</div>
+<h1>Simple nutrition for happier hair.</h1>
+<p>Discover Happy Hair's natural seed-based nutrition mix, made for an easy daily routine.</p>
+<a class="btn" href="#products">Shop now</a>
+</div></section>
+<section id="products" class="section">
+<h2>Our Products</h2>
+<p class="section-sub">Nourish your hair and scalp with natural formulations.</p>
+<div id="dynamic-store-container"></div>
+</section>
+<section id="why" class="section">
+<h2>Why Happy Hair?</h2>
+<p class="section-sub">A simple approach designed around everyday nutrition.</p>
+<div class="features">
+<div class="feature"><b>Natural ingredients</b><p>Made around familiar seed-based ingredients for a straightforward daily routine.</p></div>
+<div class="feature"><b>Easy daily routine</b><p>A convenient format that fits easily into your everyday schedule.</p></div>
+<div class="feature"><b>Made with care</b><p>Clear product information and a simple checkout experience for customers.</p></div>
+</div>
+</section>
+</main>
+<footer id="contact" class="footer">© 2026 Happy Hair. All rights reserved.</footer>
+<script src="/product-sync.js" defer></script>
+</body>
+</html>
