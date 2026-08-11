@@ -1,0 +1,29 @@
+{
+  "name": "happy-hair-store-production",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node -e \"require('./api/index')\"",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.7.9",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "razorpay": "^2.9.4",
+    "xss-clean": "^0.1.4",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  }
+}
